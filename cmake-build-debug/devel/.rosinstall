@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /home/hamada/catkin_ws/src/object_analysis/cmake-build-debug/devel/setup.sh
