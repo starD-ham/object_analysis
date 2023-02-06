@@ -18,16 +18,8 @@ void Object_detection_node::saveToJpegCb(const sensor_msgs::ImageConstPtr &msg) 
     cv::imwrite("/home/hamada/catkin_ws/src/object_analysis/img/"+std::to_string(ros::Time::now().sec)+".jpg",mat_image);
 }
 
-//---------------------------------------------------------------
-//【関数名　】：cv_Gamma
-//【処理概要】：ガンマ補正
-//【引数　　】：src        = 入力画像
-//　　　　　　：dst        = 出力画像
-//　　　　　　：gamma   = ガンマ補正値
-//【戻り値　】：なし
-//【備考　　】：モノクロ/カラー対応可
-//　　　　　　：カラーの場合はRGB全て同じガンマ補正値
-//---------------------------------------------------------------
+/// ガンマ補正を行う関数
+/// \param gamma
 void Object_detection_node::cv_Gamma(double gamma){
 
     int i;
@@ -56,17 +48,21 @@ int main(int argc, char **argv){
 //        ros::spinOnce();
 //        rate.sleep();
 //    }
+
+    Original_msgs::BoundingBoxes img_boundingBoxes;
+    Original_msgs::BoundingBoxes sonar_boundingBoxes;
     cv::Mat bw_img;
     cv::Mat hist_eq_img;
     cv::Mat sovel_image,output_image;
     cv::Mat label_image,stats,centroids;
     objectDetectionNode.m_gray_img=cv::imread("/home/hamada/catkin_ws/src/object_analysis/img/1675080818.jpg",cv::IMREAD_GRAYSCALE);
-    int img_height,img_width;
+    int img_height,img_width;//元画像のサイズ
     img_height=objectDetectionNode.m_gray_img.cols;
     img_width=objectDetectionNode.m_gray_img.rows;
     std::cout<<"height: "<<img_height<<std::endl;
     std::cout<<"width: "<<img_width<<std::endl;
     objectDetectionNode.m_original_img=cv::imread("/home/hamada/catkin_ws/src/object_analysis/img/1675080818.jpg");
+    img_boundingBoxes.image_header.stamp=ros::Time::now();
     cv::equalizeHist(objectDetectionNode.m_gray_img,hist_eq_img);
     int tsd_v=30;
     //std::cin>>tsd_v;
@@ -159,17 +155,17 @@ int main(int argc, char **argv){
     std::vector<cv::Vec3b> colors(nLabel);
     colors[0] = cv::Vec3b(0, 0, 0);//背景の色
     //小さすぎるオブジェクトと大きすぎるオブジェクトを除去する
-    int th_max,th_min;
-    th_max=img_height*img_width*0.03;//3%
-    th_min=img_height*img_width*0.001;//0.01%
+    int tsd_lb_max,tsd_lb_min;
+    tsd_lb_max=img_height*img_width*0.03;//3%
+    tsd_lb_min=img_height*img_width*0.001;//0.01%
     std::vector<int> thNLabel;//しきい値範囲内のラベル付したオブジェクトの番号
     for (int i = 1; i < nLabel; ++i) {
         int *param = stats.ptr<int>(i);
         //std::cout << "area "<< i <<" = " << param[cv::ConnectedComponentsTypes::CC_STAT_AREA] << std::endl;
-        if(param[cv::ConnectedComponentsTypes::CC_STAT_AREA]>th_min&&param[cv::ConnectedComponentsTypes::CC_STAT_AREA]<th_max){
+        if(param[cv::ConnectedComponentsTypes::CC_STAT_AREA]>tsd_lb_min&&param[cv::ConnectedComponentsTypes::CC_STAT_AREA]<tsd_lb_max){
             colors[i] = cv::Vec3b((rand() & 255), (rand() & 255), (rand() & 255));
         }
-        else{
+        else{// しきい値範囲外のピクセル値を持つ場合
             thNLabel.push_back(i);
             colors[i] = cv::Vec3b(0, 0, 0);//背景の色
         }
@@ -179,17 +175,16 @@ int main(int argc, char **argv){
     cv::Mat Dst(bw_img.size(), CV_8UC3);
     for (int i = 0; i < Dst.rows; ++i) {
         int *lb = label_image.ptr<int>(i);//指定した行の先頭へのポインタを返す
-        cv::Vec3b *pix = Dst.ptr<cv::Vec3b>(i);
+        cv::Vec3b *pix = Dst.ptr<cv::Vec3b>(i);//出力画像のi行目の先頭ポインタ
         for (int j = 0; j < Dst.cols; ++j) {
-            pix[j] = colors[lb[j]];
+            pix[j] = colors[lb[j]];//ラベル番号に等しい色を塗る
         }
     }
 
-    //ROIの設定
-    for (int i = 1; i < nLabel; ++i) {
-        Original_msgs::BoundingBox boundingBox;
-        int *param = stats.ptr<int>(i);
+    //ROIの設定。BoundingBoxを描画する
 
+    for (int i = 1; i < nLabel; ++i) {
+        int *param = stats.ptr<int>(i);
         int x = param[cv::ConnectedComponentsTypes::CC_STAT_LEFT];
         int y = param[cv::ConnectedComponentsTypes::CC_STAT_TOP];
         int height = param[cv::ConnectedComponentsTypes::CC_STAT_HEIGHT];
@@ -198,6 +193,13 @@ int main(int argc, char **argv){
         std::cout<<"Obuject number:"<<i<<std::endl;
         std::cout<<"left top "<<x<<","<<y<<"Height"<<height<<"Width"<<width<<std::endl;
         if((std::find(thNLabel.begin(), thNLabel.end(),i)==std::end(thNLabel))){
+            Original_msgs::BoundingBox boundingBox;
+            boundingBox.xmin=x;
+            boundingBox.ymin=y;
+            boundingBox.xmax=x+width;
+            boundingBox.ymax=y+height;
+            boundingBox.id=i;
+            img_boundingBoxes.bounding_boxes.push_back(boundingBox);
             cv::rectangle(Dst, cv::Rect(x, y, width, height), cv::Scalar(0, 255, 0), 2);
         }
     }
@@ -231,5 +233,32 @@ int main(int argc, char **argv){
 
     //cv::imshow("Src", src);
     cv::imshow("Labels", Dst);
+
+    //hydrophone画像の処理
+    objectDetectionNode.m_sonar_img=cv::imread("/home/hamada/catkin_ws/src/object_analysis/img1674805150.jpg",cv::IMREAD_GRAYSCALE);
+    float depth=1.0;//DVLから取得する
+    double x_diff=0.1;
+    for(int i=0;i<thNLabel.size();i++){
+        // x,y位置cm換算
+        double x_pos=(img_boundingBoxes.bounding_boxes[i].xmin-(objectDetectionNode.m_original_img.rows/2))*(0.143/depth);
+        double y_pos=(img_boundingBoxes.bounding_boxes[i].ymin-(objectDetectionNode.m_original_img.cols/2))*(0.143/depth);
+        // 左上の位置-画像中央
+        double x_reso=3.6*2*50;//設定したい距離*上下2倍*センチメートル換算
+        float obj_x_size=round((img_boundingBoxes.bounding_boxes[i].xmax-img_boundingBoxes.bounding_boxes[i].xmin)*(0.143/depth));
+        //ここでcm換算　xmax-xmin->x方向のピクセル数*0.143/1m
+        x_pos=x_pos+x_diff;//ソナー画像上のx位置
+        Original_msgs::BoundingBox sonarBoundingBox;
+        sonarBoundingBox.xmin=round(x_pos)+x_reso/2;
+        sonarBoundingBox.xmax=sonarBoundingBox.xmin+obj_x_size;
+        sonarBoundingBox.ymin=depth*100;
+        sonarBoundingBox.ymax= sonarBoundingBox.ymin+50;
+        sonar_boundingBoxes.bounding_boxes.push_back(sonarBoundingBox);
+        cv::rectangle(objectDetectionNode.m_sonar_img, cv::Rect(sonarBoundingBox.xmin, sonarBoundingBox.ymin, obj_x_size+10, 15), cv::Scalar(255, 255, 255), 2);
+        cv::imshow("sonar",objectDetectionNode.m_sonar_img);
+    }
+    //
+    /*x_reso=echo_msg.range*2*50;*/
+
+
     cv::waitKey(-1);
 }
