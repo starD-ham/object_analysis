@@ -4,7 +4,7 @@
 
 #include "../include/Object_detection.h"
 Object_detection_node::Object_detection_node() {
-    this->m_imgSub=this->m_nh.subscribe("/image_rect_color", 1000, &Object_detection_node::saveToJpegCb, this);
+    this->m_imgSub=this->m_nh.subscribe("/image_raw", 1000, &Object_detection_node::saveToJpegCb, this);
     cv::Mat img;
 }
 
@@ -55,13 +55,13 @@ int main(int argc, char **argv){
     cv::Mat hist_eq_img;
     cv::Mat sovel_image,output_image;
     cv::Mat label_image,stats,centroids;
-    objectDetectionNode.m_gray_img=cv::imread("/home/hamada/catkin_ws/src/object_analysis/img/1675080818.jpg",cv::IMREAD_GRAYSCALE);
+    objectDetectionNode.m_gray_img=cv::imread("/home/hamada/catkin_ws/src/object_analysis/img/1675682374.jpg",cv::IMREAD_GRAYSCALE);
     int img_height,img_width;//元画像のサイズ
     img_height=objectDetectionNode.m_gray_img.cols;
     img_width=objectDetectionNode.m_gray_img.rows;
     std::cout<<"height: "<<img_height<<std::endl;
     std::cout<<"width: "<<img_width<<std::endl;
-    objectDetectionNode.m_original_img=cv::imread("/home/hamada/catkin_ws/src/object_analysis/img/1675080818.jpg");
+    objectDetectionNode.m_original_img=cv::imread("/home/hamada/catkin_ws/src/object_analysis/img/1675682374.jpg");
     img_boundingBoxes.image_header.stamp=ros::Time::now();
     cv::equalizeHist(objectDetectionNode.m_gray_img,hist_eq_img);
     int tsd_v=30;
@@ -164,12 +164,13 @@ int main(int argc, char **argv){
         //std::cout << "area "<< i <<" = " << param[cv::ConnectedComponentsTypes::CC_STAT_AREA] << std::endl;
         if(param[cv::ConnectedComponentsTypes::CC_STAT_AREA]>tsd_lb_min&&param[cv::ConnectedComponentsTypes::CC_STAT_AREA]<tsd_lb_max){
             colors[i] = cv::Vec3b((rand() & 255), (rand() & 255), (rand() & 255));
+            thNLabel.push_back(i);
         }
         else{// しきい値範囲外のピクセル値を持つ場合
-            thNLabel.push_back(i);
             colors[i] = cv::Vec3b(0, 0, 0);//背景の色
         }
     }
+    Original_msgs::ObjectStats objs[nLabel];
 
     // ラベリング結果の描画
     cv::Mat Dst(bw_img.size(), CV_8UC3);
@@ -190,9 +191,9 @@ int main(int argc, char **argv){
         int height = param[cv::ConnectedComponentsTypes::CC_STAT_HEIGHT];
         int width = param[cv::ConnectedComponentsTypes::CC_STAT_WIDTH];
 
-        std::cout<<"Obuject number:"<<i<<std::endl;
+        std::cout<<"Object number:"<<i<<std::endl;
         std::cout<<"left top "<<x<<","<<y<<"Height"<<height<<"Width"<<width<<std::endl;
-        if((std::find(thNLabel.begin(), thNLabel.end(),i)==std::end(thNLabel))){
+        if((std::find(thNLabel.begin(), thNLabel.end(),i)!=std::end(thNLabel))){
             Original_msgs::BoundingBox boundingBox;
             boundingBox.xmin=x;
             boundingBox.ymin=y;
@@ -200,6 +201,7 @@ int main(int argc, char **argv){
             boundingBox.ymax=y+height;
             boundingBox.id=i;
             img_boundingBoxes.bounding_boxes.push_back(boundingBox);
+            objs[i].image_bounding_box=boundingBox;
             cv::rectangle(Dst, cv::Rect(x, y, width, height), cv::Scalar(0, 255, 0), 2);
         }
     }
@@ -210,7 +212,9 @@ int main(int argc, char **argv){
         int x = static_cast<int>(param[0]);
         int y = static_cast<int>(param[1]);
 
-        if((std::find(thNLabel.begin(), thNLabel.end(),i)==std::end(thNLabel))){
+        if((std::find(thNLabel.begin(), thNLabel.end(),i)!=std::end(thNLabel))){
+            objs->center_x=x;
+            objs->center_y=y;
             cv::circle(Dst,cv::Point(x, y), 3, cv::Scalar(0, 0, 255), -1);
         }
     }
@@ -226,7 +230,8 @@ int main(int argc, char **argv){
         std::stringstream num;
         num << i;
         //cv::putText(Dst, num.str(), cv::Point(x+5, y+20), cv::FONT_HERSHEY_COMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
-        if((std::find(thNLabel.begin(), thNLabel.end(),i)==std::end(thNLabel))){
+        if((std::find(thNLabel.begin(), thNLabel.end(),i)!=std::end(thNLabel))){
+            objs->size=param[cv::ConnectedComponentsTypes::CC_STAT_AREA];
             cv::putText(Dst, num.str(), cv::Point(x+5, y+20), cv::FONT_HERSHEY_COMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
         }
     }
@@ -235,10 +240,13 @@ int main(int argc, char **argv){
     cv::imshow("Labels", Dst);
 
     //hydrophone画像の処理
-    objectDetectionNode.m_sonar_img=cv::imread("/home/hamada/catkin_ws/src/object_analysis/img1674805150.jpg",cv::IMREAD_GRAYSCALE);
+    objectDetectionNode.m_sonar_img=cv::imread("/home/hamada/catkin_ws/src/object_analysis/img/1674634360.635032.jpg");
+    //cv::Mat sonar_draw=objectDetectionNode.m_sonar_img;
     float depth=1.0;//DVLから取得する
     double x_diff=0.1;
+    std::cout<<thNLabel.size()<<std::endl;
     for(int i=0;i<thNLabel.size();i++){
+        cv::Mat sonar_draw=objectDetectionNode.m_sonar_img.clone();
         // x,y位置cm換算
         double x_pos=(img_boundingBoxes.bounding_boxes[i].xmin-(objectDetectionNode.m_original_img.rows/2))*(0.143/depth);
         double y_pos=(img_boundingBoxes.bounding_boxes[i].ymin-(objectDetectionNode.m_original_img.cols/2))*(0.143/depth);
@@ -248,16 +256,26 @@ int main(int argc, char **argv){
         //ここでcm換算　xmax-xmin->x方向のピクセル数*0.143/1m
         x_pos=x_pos+x_diff;//ソナー画像上のx位置
         Original_msgs::BoundingBox sonarBoundingBox;
-        sonarBoundingBox.xmin=round(x_pos)+x_reso/2;
-        sonarBoundingBox.xmax=sonarBoundingBox.xmin+obj_x_size;
-        sonarBoundingBox.ymin=depth*100;
-        sonarBoundingBox.ymax= sonarBoundingBox.ymin+50;
+        sonarBoundingBox.xmin=round(-x_pos)+x_reso/2;
+        sonarBoundingBox.xmax=sonarBoundingBox.xmin+obj_x_size+10;
+        sonarBoundingBox.ymin=x_reso/2-depth*100;
+        sonarBoundingBox.ymax= sonarBoundingBox.ymin+60;
         sonar_boundingBoxes.bounding_boxes.push_back(sonarBoundingBox);
-        cv::rectangle(objectDetectionNode.m_sonar_img, cv::Rect(sonarBoundingBox.xmin, sonarBoundingBox.ymin, obj_x_size+10, 15), cv::Scalar(255, 255, 255), 2);
-        cv::imshow("sonar",objectDetectionNode.m_sonar_img);
+        cv::Mat mat(objectDetectionNode.m_sonar_img,cv::Rect(sonarBoundingBox.xmin,sonarBoundingBox.ymin,obj_x_size,50));
+        resize(mat,mat,cv::Size(),10,10);
+        cv::imshow("clip"+ std::to_string(thNLabel[i]),mat);
+
+        cv::Scalar ave=cv::mean(mat);
+        objs->sonar_bounding_box=sonarBoundingBox;
+        objs->acoustic_ave=ave[2]+ave[1]+ave[0];
+        std::cout<<thNLabel[i]<<":"<<objs->acoustic_ave<<std::endl;
+        cv::rectangle(sonar_draw, cv::Rect(sonarBoundingBox.xmin, sonarBoundingBox.ymin, obj_x_size+10, 15), cv::Scalar((rand() & 255), (rand() & 255), (rand() & 255)), 2);
+        //cv::resize(sonar_draw,sonar_draw,cv::Size(),1000/sonar_draw.cols,1000/sonar_draw.rows);
+        cv::imshow("sonar"+ std::to_string(thNLabel[i]),sonar_draw);
     }
     //
     /*x_reso=echo_msg.range*2*50;*/
+
 
 
     cv::waitKey(-1);

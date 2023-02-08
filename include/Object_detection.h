@@ -8,6 +8,7 @@
 #include "Original_msgs/Ping360.h"
 #include "Original_msgs/BoundingBox.h"
 #include "Original_msgs/BoundingBoxes.h"
+#include "Original_msgs/ObjectStats.h"
 #include "opencv2/opencv.hpp"
 #include "cv_bridge/cv_bridge.h"
 #include "sensor_msgs/Image.h"
