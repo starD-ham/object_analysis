@@ -18,19 +18,23 @@ public:
     Object_detection_node();
     ros::NodeHandle m_nh;
     ros::Subscriber m_imgSub;
-    void saveToJpegCb(const sensor_msgs::ImageConstPtr& msg);
-    void cv_Gamma(double gamma);
+    ros::Publisher m_labelPub;
+    void saveToJpegCb(const sensor_msgs::ImageConstPtr& msg);//画像保存用
+    void imgCb(const sensor_msgs::ImageConstPtr& msg);//画像処理用
+    void cv_Gamma(cv::Mat& in,cv::Mat& dst,double gamma);//ガンマ処理
+    int cv_Label(cv::Mat& in, cv::Mat& dst,cv::Mat& label_img, cv::Mat& stats, cv::Mat& centroids,Original_msgs::BoundingBoxes& imgBoundingBoxes);//ラベリング処理
 
     /*前処理用メンバ*/
     cv::Mat m_original_img;
     cv::Mat m_gray_img;//グレースケール
+    cv::Mat m_hist_eq_img;//ヒストグラム平均化
     int m_img_height;
     int m_img_width;
+
     cv::Mat m_gamma_img;//ガンマ補正
     float gamma;//ガンマ補正パラメータ
     cv::Mat m_bw_img;//2値化
     int m_tsd_bw;//2値化しきい値。グレースケールの輝度0~255で指定
-    cv::Mat m_hist_eq_img;//ヒストグラム平均化
 
     /*ラベル付用メンバ*/
     cv::Mat m_label_img;//ラベル付した画像。座標にラベル番号が格納されている
