@@ -18,9 +18,12 @@ public:
     Object_detection_node();
     ros::NodeHandle m_nh;
     ros::Subscriber m_imgSub;
+    ros::Subscriber m_sonarSub;
+    ros::Publisher m_sonarPub;
     ros::Publisher m_labelPub;
     void saveToJpegCb(const sensor_msgs::ImageConstPtr& msg);//画像保存用
     void imgCb(const sensor_msgs::ImageConstPtr& msg);//画像処理用
+    void sonarCb(const sensor_msgs::ImageConstPtr& msg);
     void cv_Gamma(cv::Mat& in,cv::Mat& dst,double gamma);//ガンマ処理
     int cv_Label(cv::Mat& in, cv::Mat& dst,cv::Mat& label_img, cv::Mat& stats, cv::Mat& centroids,Original_msgs::BoundingBoxes& imgBoundingBoxes);//ラベリング処理
 
@@ -47,6 +50,10 @@ public:
     int m_nLabel;//ラベル付けしたオブジェクトの数
     int m_tsd_label_max;//ラベル付けしたオブジェクトの最大ピクセル数
     int m_tsd_label_min;//ラベル付けしたオブジェクトの最小ピクセル数
+
+    Original_msgs::BoundingBoxes m_img_boundingBoxes;
+    Original_msgs::BoundingBoxes m_sonar_boundingBoxes;
+    std::vector<Original_msgs::ObjectStats>  m_objs;
 
     /*ソナー画像のラベル付用メンバ*/
     cv::Mat m_sonar_img;//sonar image グレースケールで出力させる

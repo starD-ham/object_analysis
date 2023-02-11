@@ -4,8 +4,57 @@
 
 #include "../include/Object_detection.h"
 Object_detection_node::Object_detection_node() {
-    this->m_imgSub=this->m_nh.subscribe("/usb_cam/image_raw", 1000, &Object_detection_node::imgCb, this);
+    this->m_imgSub=this->m_nh.subscribe("/image_raw", 1000, &Object_detection_node::imgCb, this);
     this->m_labelPub=this->m_nh.advertise<sensor_msgs::Image>("/image_labeled",1000);
+    this->m_sonarSub=this->m_nh.subscribe("/image_jet",1000,&Object_detection_node::sonarCb,this);
+    this->m_sonarPub=this->m_nh.advertise<sensor_msgs::Image>("/sonar_labeled",1000);
+}
+
+void Object_detection_node::sonarCb(const sensor_msgs::ImageConstPtr &msg) {
+        //ping360画像の処理
+    cv_bridge::CvImagePtr bridge;
+    //bridge=cv_bridge::toCvCopy(msg,sensor_msgs::image_encodings::MONO8);//ROSからOpenCVの形式にtoCvCopy()で変換。cv_ptr->imageがcv::Matフォーマット。
+    //this->m_gray_img=bridge->image;
+    bridge=cv_bridge::toCvCopy(msg,sensor_msgs::image_encodings::BGR8);
+    this->m_sonar_img=bridge->image;
+    //cv::Mat sonar_draw=objectDetectionNode.m_sonar_img;
+    float depth=1.0;//DVLから取得する
+    double x_diff=0.1;
+    std::cout<<m_nLabel<<std::endl;
+//    cv::Mat sonar_draw;
+//    sonar_draw=m_sonar_img.clone();
+    for(int i=0;i<m_nLabel;i++){
+        // x,y位置cm換算
+        double x_pos=(m_img_boundingBoxes.bounding_boxes[i].xmin-(m_original_img.rows/2))*(0.143/depth);// 深度1mで1pixel0.143cm
+        double y_pos=(m_img_boundingBoxes.bounding_boxes[i].ymin-(m_original_img.cols/2))*(0.143/depth);
+        // 左上の位置-画像中央
+        double x_reso=3.6*2*50;//設定したい距離*上下2倍*センチメートル換算
+        float obj_x_size=round((m_img_boundingBoxes.bounding_boxes[i].xmax-m_img_boundingBoxes.bounding_boxes[i].xmin)*(0.143/depth));
+        //ここでcm換算　xmax-xmin->x方向のピクセル数*0.143/1m
+        x_pos=x_pos+x_diff;//ソナー画像上のx位置
+        Original_msgs::BoundingBox sonarBoundingBox;
+        sonarBoundingBox.xmin=round(-x_pos)+x_reso/2;
+        sonarBoundingBox.xmax=sonarBoundingBox.xmin+obj_x_size+10;
+        sonarBoundingBox.ymin=x_reso/2-depth*100;
+        sonarBoundingBox.ymax= sonarBoundingBox.ymin+60;
+        m_sonar_boundingBoxes.bounding_boxes.push_back(sonarBoundingBox);
+        cv::Mat mat(m_sonar_img,cv::Rect(sonarBoundingBox.xmin,sonarBoundingBox.ymin,obj_x_size,50));
+        //resize(mat,mat,cv::Size(),10,10);
+        //cv::imshow("clip"+ std::to_string(thNLabel[i]),mat);
+
+        cv::Scalar ave=cv::mean(mat);
+        m_objs[i].sonar_bounding_box=sonarBoundingBox;
+        m_objs[i].acoustic_ave=ave[2]+ave[1]+ave[0];
+        //std::cout<<thNLabel[i]<<":"<<objs->acoustic_ave<<std::endl;
+        cv::rectangle(m_sonar_img, cv::Rect(sonarBoundingBox.xmin, sonarBoundingBox.ymin, obj_x_size+10, 15), cv::Scalar((rand() & 255), (rand() & 255), (rand() & 255)), 2);
+        //cv::resize(sonar_draw,sonar_draw,cv::Size(),1000/sonar_draw.cols,1000/sonar_draw.rows);
+        //cv::imshow("sonar"+ std::to_string(i),sonar_draw);
+    }
+    bridge->image=m_sonar_img;
+    bridge->encoding="bgr8";
+    bridge->header.stamp=ros::Time::now();
+    m_sonarPub.publish(bridge);
+
 }
 
 /// JPEGに保存するCallback
@@ -24,8 +73,6 @@ void Object_detection_node::imgCb(const sensor_msgs::ImageConstPtr &msg) {
     this->m_gray_img=bridge->image;
     bridge=cv_bridge::toCvCopy(msg,sensor_msgs::image_encodings::BGR8);
     this->m_original_img=bridge->image;
-    Original_msgs::BoundingBoxes img_boundingBoxes;
-    Original_msgs::BoundingBoxes sonar_boundingBoxes;
     cv::Mat sovel_image,output_image;
     //cv::Mat label_image,stats,centroids;
 
@@ -33,7 +80,7 @@ void Object_detection_node::imgCb(const sensor_msgs::ImageConstPtr &msg) {
     img_height=this->m_gray_img.cols;
     img_width=this->m_gray_img.rows;
 
-    img_boundingBoxes.image_header.stamp=ros::Time::now();
+    m_img_boundingBoxes.image_header.stamp=ros::Time::now();
     cv::equalizeHist(this->m_gray_img,this->m_hist_eq_img);
     m_tsd_bw=30;
     //std::cin>>tsd_v;
@@ -65,7 +112,7 @@ void Object_detection_node::imgCb(const sensor_msgs::ImageConstPtr &msg) {
 //    cv::imshow("filled",filled);
 
     cv::Mat Dst(m_bw_img.size(),CV_8UC3);
-    cv_Label(m_bw_img,Dst,m_label_img,m_stats,m_centroids,img_boundingBoxes);
+    m_nLabel=cv_Label(m_bw_img,Dst,m_label_img,m_stats,m_centroids,m_img_boundingBoxes);
 
     bridge->image=Dst;
     bridge->encoding="bgr8";
@@ -192,8 +239,10 @@ int Object_detection_node::cv_Label(cv::Mat& in, cv::Mat& dst,cv::Mat& label_img
         //cv::putText(Dst, num.str(), cv::Point(x+5, y+20), cv::FONT_HERSHEY_COMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
         if((std::find(thNLabel.begin(), thNLabel.end(),i)!=std::end(thNLabel))){
             objs->size=param[cv::ConnectedComponentsTypes::CC_STAT_AREA];
+            m_objs.push_back(objs[i]);
             cv::putText(dst, num.str(), cv::Point(x+5, y+20), cv::FONT_HERSHEY_COMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
         }
+        m_objs.push_back(objs[i]);
     }
     return thNLabel.size();
 }
