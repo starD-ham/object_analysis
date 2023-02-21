@@ -20,6 +20,7 @@ public:
     ros::Subscriber m_imgSub;
     ros::Subscriber m_sonarSub;
     ros::Publisher m_sonarPub;
+    ros::Publisher m_medianSonarPub;
     ros::Publisher m_labelPub;
     void saveToJpegCb(const sensor_msgs::ImageConstPtr& msg);//画像保存用
     void imgCb(const sensor_msgs::ImageConstPtr& msg);//画像処理用
@@ -30,6 +31,7 @@ public:
     /*前処理用メンバ*/
     cv::Mat m_original_img;
     cv::Mat m_gray_img;//グレースケール
+    cv::Mat m_otsu_bw_img;//おおつの手法による白黒2値化画像
     cv::Mat m_hist_eq_img;//ヒストグラム平均化
     int m_img_height;
     int m_img_width;

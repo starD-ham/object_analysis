@@ -5,38 +5,48 @@
 #include "../include/Object_detection.h"
 Object_detection_node::Object_detection_node() {
     this->m_imgSub=this->m_nh.subscribe("/image_raw", 1000, &Object_detection_node::imgCb, this);
-    this->m_labelPub=this->m_nh.advertise<sensor_msgs::Image>("/image_labeled",1000);
-    this->m_sonarSub=this->m_nh.subscribe("/image_jet",1000,&Object_detection_node::sonarCb,this);
-    this->m_sonarPub=this->m_nh.advertise<sensor_msgs::Image>("/sonar_labeled",1000);
+    this->m_labelPub=this->m_nh.advertise<sensor_msgs::Image>("/image/labeled",1000);
+    this->m_sonarSub=this->m_nh.subscribe("/sonar_img/raw",1000,&Object_detection_node::sonarCb,this);
+    this->m_sonarPub=this->m_nh.advertise<sensor_msgs::Image>("/sonar_img/labeled",1000);
+    this->m_medianSonarPub=this->m_nh.advertise<sensor_msgs::Image>("/sonar_img/median",1000);
 }
 
 void Object_detection_node::sonarCb(const sensor_msgs::ImageConstPtr &msg) {
         //ping360画像の処理
-    cv_bridge::CvImagePtr bridge;
+    cv_bridge::CvImagePtr bridge,median_bridge;
     //bridge=cv_bridge::toCvCopy(msg,sensor_msgs::image_encodings::MONO8);//ROSからOpenCVの形式にtoCvCopy()で変換。cv_ptr->imageがcv::Matフォーマット。
     //this->m_gray_img=bridge->image;
     bridge=cv_bridge::toCvCopy(msg,sensor_msgs::image_encodings::BGR8);
+    median_bridge=cv_bridge::toCvCopy(msg,sensor_msgs::image_encodings::BGR8);
     this->m_sonar_img=bridge->image;
     //cv::Mat sonar_draw=objectDetectionNode.m_sonar_img;
     float depth=1.0;//DVLから取得する
-    double x_diff=0.1;
+    double x_diff=100;//100mm
     std::cout<<m_nLabel<<std::endl;
 //    cv::Mat sonar_draw;
 //    sonar_draw=m_sonar_img.clone();
+    double x_mini=(1200-x_diff/1.5)-(m_gray_img.cols/2)*(1.43/depth)/1.5;
+    double x_max=(1200-x_diff/1.5)+((m_gray_img.cols/2)*(1.43/depth))/1.5;
+    double width_max=x_max-x_mini;//610pixel
+    std::cout<<"image_rows,x_mini, width_max"<<m_gray_img.cols<<","<<x_mini<<","<<width_max<<std::endl;
+    cv::rectangle(m_sonar_img, cv::Rect(x_mini, 1200-depth*1000*2/3, width_max, 15), cv::Scalar(255, 255, 255), 2);
     for(int i=0;i<m_nLabel;i++){
-        // x,y位置cm換算
-        double x_pos=(m_img_boundingBoxes.bounding_boxes[i].xmin-(m_original_img.rows/2))*(0.143/depth);// 深度1mで1pixel0.143cm
-        double y_pos=(m_img_boundingBoxes.bounding_boxes[i].ymin-(m_original_img.cols/2))*(0.143/depth);
+        // x,y位置m換算
+        double x_pos=(1200-x_diff/1.5)+(m_img_boundingBoxes.bounding_boxes[i].xmin-m_gray_img.cols/2)*(1.43/depth)/1.5;// 深度1mで1pixel0.0143m
+        //double y_pos=(-m_img_boundingBoxes.bounding_boxes[i].ymin+(m_original_img.cols/2))*(0.143/depth);
         // 左上の位置-画像中央
-        double x_reso=3.6*2*50;//設定したい距離*上下2倍*センチメートル換算
-        float obj_x_size=round((m_img_boundingBoxes.bounding_boxes[i].xmax-m_img_boundingBoxes.bounding_boxes[i].xmin)*(0.143/depth));
+        double x_reso=2400;//設定したい距離*上下2倍*センチメートル換算
+        double obj_x_size=(m_img_boundingBoxes.bounding_boxes[i].xmax-m_img_boundingBoxes.bounding_boxes[i].xmin)*(1.43/depth)/1.5;
+        //x_pos=x_pos-x_diff;//ソナー画像上のx位置
+        std::cout<<"obj_size,xmin:"<<obj_x_size<<","<<x_pos<<std::endl;
         //ここでcm換算　xmax-xmin->x方向のピクセル数*0.143/1m
-        x_pos=x_pos+x_diff;//ソナー画像上のx位置
         Original_msgs::BoundingBox sonarBoundingBox;
-        sonarBoundingBox.xmin=round(-x_pos)+x_reso/2;
-        sonarBoundingBox.xmax=sonarBoundingBox.xmin+obj_x_size+10;
-        sonarBoundingBox.ymin=x_reso/2-depth*100;
-        sonarBoundingBox.ymax= sonarBoundingBox.ymin+60;
+        sonarBoundingBox.xmin=x_pos;
+        sonarBoundingBox.xmax=sonarBoundingBox.xmin+obj_x_size;
+        //int width=int(sonarBoundingBox.xmax-sonarBoundingBox.xmin);
+        std::cout<<"xmin,xmax:"<<sonarBoundingBox.xmin<<","<<sonarBoundingBox.xmax<<","<<obj_x_size<<std::endl;
+        sonarBoundingBox.ymin=x_reso/2-depth*1000*2/3;
+        sonarBoundingBox.ymax= sonarBoundingBox.ymin+50;
         m_sonar_boundingBoxes.bounding_boxes.push_back(sonarBoundingBox);
         cv::Mat mat(m_sonar_img,cv::Rect(sonarBoundingBox.xmin,sonarBoundingBox.ymin,obj_x_size,50));
         //resize(mat,mat,cv::Size(),10,10);
@@ -46,7 +56,7 @@ void Object_detection_node::sonarCb(const sensor_msgs::ImageConstPtr &msg) {
         m_objs[i].sonar_bounding_box=sonarBoundingBox;
         m_objs[i].acoustic_ave=ave[2]+ave[1]+ave[0];
         //std::cout<<thNLabel[i]<<":"<<objs->acoustic_ave<<std::endl;
-        cv::rectangle(m_sonar_img, cv::Rect(sonarBoundingBox.xmin, sonarBoundingBox.ymin, obj_x_size+10, 15), cv::Scalar((rand() & 255), (rand() & 255), (rand() & 255)), 2);
+        cv::rectangle(m_sonar_img, cv::Rect(sonarBoundingBox.xmin, sonarBoundingBox.ymin, obj_x_size, 15), cv::Scalar((rand() & 255), (rand() & 255), (rand() & 255)), 2);
         //cv::resize(sonar_draw,sonar_draw,cv::Size(),1000/sonar_draw.cols,1000/sonar_draw.rows);
         //cv::imshow("sonar"+ std::to_string(i),sonar_draw);
     }
@@ -54,6 +64,7 @@ void Object_detection_node::sonarCb(const sensor_msgs::ImageConstPtr &msg) {
     bridge->encoding="bgr8";
     bridge->header.stamp=ros::Time::now();
     m_sonarPub.publish(bridge);
+    ROS_INFO("sonar image publish");
 
 }
 
@@ -71,6 +82,7 @@ void Object_detection_node::imgCb(const sensor_msgs::ImageConstPtr &msg) {
     cv_bridge::CvImagePtr bridge;
     bridge=cv_bridge::toCvCopy(msg,sensor_msgs::image_encodings::MONO8);//ROSからOpenCVの形式にtoCvCopy()で変換。cv_ptr->imageがcv::Matフォーマット。
     this->m_gray_img=bridge->image;
+    this->m_bw_img=bridge->image;
     bridge=cv_bridge::toCvCopy(msg,sensor_msgs::image_encodings::BGR8);
     this->m_original_img=bridge->image;
     cv::Mat sovel_image,output_image;
@@ -86,7 +98,9 @@ void Object_detection_node::imgCb(const sensor_msgs::ImageConstPtr &msg) {
     //std::cin>>tsd_v;
     this->cv_Gamma(m_gray_img,m_gamma_img,0.65);
     cv::threshold(this->m_hist_eq_img,m_bw_img,m_tsd_bw,255,cv::THRESH_BINARY);
+    cv::threshold(this->m_gray_img,m_otsu_bw_img,0,255,cv::THRESH_OTSU);
     cv::bitwise_not(m_bw_img,m_bw_img);//白黒の反転
+    cv::bitwise_not(m_otsu_bw_img,m_otsu_bw_img);
 
     //画像の収縮を行う
 //    cv::Mat erode_kernel;
@@ -118,6 +132,7 @@ void Object_detection_node::imgCb(const sensor_msgs::ImageConstPtr &msg) {
     bridge->encoding="bgr8";
     bridge->header.stamp=ros::Time::now();
     m_labelPub.publish(bridge);
+    ROS_INFO("labeled image publish");
     //cv::imshow("Src", src);
     //cv::imshow("Labels", Dst);
 
@@ -198,8 +213,8 @@ int Object_detection_node::cv_Label(cv::Mat& in, cv::Mat& dst,cv::Mat& label_img
         int height = param[cv::ConnectedComponentsTypes::CC_STAT_HEIGHT];
         int width = param[cv::ConnectedComponentsTypes::CC_STAT_WIDTH];
 
-        std::cout<<"Object number:"<<i<<std::endl;
-        std::cout<<"left top "<<x<<","<<y<<"Height"<<height<<"Width"<<width<<std::endl;
+        //std::cout<<"Object number:"<<i<<std::endl;
+        //std::cout<<"left top "<<x<<","<<y<<"Height"<<height<<"Width"<<width<<std::endl;
         if((std::find(thNLabel.begin(), thNLabel.end(),i)!=std::end(thNLabel))){
             Original_msgs::BoundingBox boundingBox;
             boundingBox.xmin=x;
@@ -229,7 +244,7 @@ int Object_detection_node::cv_Label(cv::Mat& in, cv::Mat& dst,cv::Mat& label_img
     //面積値の出力
     for (int i = 1; i < nLabel; ++i) {
         int *param = m_stats.ptr<int>(i);
-        std::cout << "area "<< i <<" = " << param[cv::ConnectedComponentsTypes::CC_STAT_AREA] << std::endl;
+        //std::cout << "area "<< i <<" = " << param[cv::ConnectedComponentsTypes::CC_STAT_AREA] << std::endl;
 
         //ROIの左上に番号を書き込む
         int x = param[cv::ConnectedComponentsTypes::CC_STAT_LEFT];
